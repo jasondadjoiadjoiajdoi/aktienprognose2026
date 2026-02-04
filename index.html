@@ -111,28 +111,20 @@ function progress(p){bar.style.width=p+"%";}
 <script>
 /* ================= SYMBOL FIX ================= */
 function normalizeSymbol(s){
-  const map={
-    "SAP":"SAP",
-    "ASML":"ASML",
-    "NESN":"NESN",
-    "ROG":"ROG",
-    "ABB":"ABB"
-  };
+  const map={"SAP":"SAP","ASML":"ASML","NESN":"NESN","ROG":"ROG","ABB":"ABB"};
   return map[s]||s;
 }
 
-/* ================= CACHE + COOLDOWN =================
-   30 Minuten pro Aktie
-*/
+/* ================= CACHE + COOLDOWN ================= */
 const CACHE_MINUTES = 30;
 function getCacheKey(sym){ return "sp_cache_"+sym; }
 
 function loadFromCache(sym){
-  const raw=localStorage.getItem(getCacheKey(sym));
+  const raw = localStorage.getItem(getCacheKey(sym));
   if(!raw) return null;
   try{
-    const c=JSON.parse(raw);
-    if(Date.now()-c.time < CACHE_MINUTES*60000) return c.data;
+    const c = JSON.parse(raw);
+    if(Date.now() - c.time < CACHE_MINUTES*60000) return c.data;
   }catch{}
   return null;
 }
@@ -151,14 +143,15 @@ async function loadMarketData(){
     const r = await fetch(`https://stockprices.dev/api/stocks/${sym}`);
     const d = await r.json();
 
-    if(!d || !d.Price) return {__error:"NO_DATA"};
+    if(!d || !d.Price) throw "NO_DATA";
 
-    // Für Chart generieren wir ein kleines fiktives Array
-    const prices = Array.from({length:30},(_,i)=>d.Price*(1 + (Math.random()-0.5)*0.02));
+    const prices = [d.Price]; // nur der aktuelle Preis, Chart zeigt Linie
 
     saveToCache(sym,prices);
     return prices;
   }catch{
+    const cachedData = loadFromCache(sym);
+    if(cachedData) return cachedData;
     return {__error:"FETCH_FAILED"};
   }
 }
@@ -179,10 +172,10 @@ kiBtn.addEventListener("click",()=>{
 function runKI(prices){
   const n = prices.length-1;
   let score = 0, reasons=[];
-  if(prices[n]>prices[n-5]){score+=3; reasons.push("• Aufwärtstrend");}
-  if(prices[n]>prices[n-12]){score+=2; reasons.push("• Mittelfristig positiv");}
-  if(prices[n]>prices[n-1]){score+=2; reasons.push("• Momentum positiv");}
-  const vol = Math.abs(prices[n]-prices[n-4])/prices[n];
+  if(prices[n]>Math.min(...prices.slice(0,Math.max(n-5,0)))){score+=3; reasons.push("• Aufwärtstrend");}
+  if(prices[n]>Math.min(...prices.slice(0,Math.max(n-12,0)))){score+=2; reasons.push("• Mittelfristig positiv");}
+  if(prices[n]>prices[n-1]||prices.length===1){score+=2; reasons.push("• Momentum positiv");}
+  const vol = prices.length>1?Math.abs(prices[n]-prices[Math.max(n-4,0)])/prices[n]:0;
   if(vol<0.03){score+=2; reasons.push("• Ruhige Phase");}else{score-=1; reasons.push("• Volatil");}
 
   let signal="HALTEN";
@@ -207,11 +200,7 @@ btn.addEventListener("click",async()=>{
   const data = await loadMarketData();
 
   if(data.__error){
-    const map = {
-      "NO_DATA":"📉 Keine Marktdaten",
-      "FETCH_FAILED":"🌐 Netzwerkfehler"
-    };
-    info.textContent = map[data.__error] || "⚠️ Fehler";
+    info.textContent = data.__error==="FETCH_FAILED"?"⚠️ Netzwerk/Server nicht erreichbar":"⚠️ Fehler";
     status.textContent="⚠️ Analyse nicht möglich";
     btn.disabled=false;
     progress(0);
