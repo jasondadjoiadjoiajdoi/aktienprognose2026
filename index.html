@@ -25,7 +25,7 @@ canvas{margin-top:12px;background:#111;border-radius:12px}
 <body>
 
 <h1>KI Aktien Analyse 2026</h1>
-<small>Client-only • Key-frei • GitHub Pages tauglich</small>
+<small>Live Daten • Twelve Data API • GitHub Pages tauglich</small>
 
 <select id="stock"></select>
 <button id="analyzeBtn">🔍 Analyse starten</button>
@@ -109,9 +109,12 @@ const btn=document.getElementById("analyzeBtn");
 function progress(p){bar.style.width=p+"%";}
 </script>
 <script>
+/* ================= TWELVE DATA API ================= */
+const TWELVE_KEY = "fb30e9c5783845ab83a6e9c57e4d75cd"; // kostenloser Demo-Key, für deinen eigenen Key ersetzen
+
 /* ================= CACHE + COOLDOWN ================= */
 const CACHE_MINUTES = 30;
-function getCacheKey(sym){ return "yf_cache_"+sym; }
+function getCacheKey(sym){ return "td_cache_"+sym; }
 
 function loadFromCache(sym){
   const raw = localStorage.getItem(getCacheKey(sym));
@@ -126,22 +129,19 @@ function saveToCache(sym,data){
   localStorage.setItem(getCacheKey(sym),JSON.stringify({time:Date.now(),data}));
 }
 
-/* ================= LIVE DATEN (Yahoo/Stooq) ================= */
+/* ================= LIVE DATEN ================= */
 async function loadMarketData(){
   const sym = stockSel.value;
   const cached = loadFromCache(sym);
   if(cached) return cached;
 
   try{
-    // Yahoo Finance CSV-Download URL (JSON geht via CORS nicht direkt)
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=1mo`;
+    const url = `https://api.twelvedata.com/time_series?symbol=${sym}&interval=1day&outputsize=30&apikey=${TWELVE_KEY}`;
     const r = await fetch(url);
     const json = await r.json();
-    if(!json.chart || !json.chart.result) throw "NO_DATA";
+    if(!json.values) throw "NO_DATA";
 
-    const prices = json.chart.result[0].indicators.quote[0].close.map(p=>p||0).filter(p=>p>0);
-    if(prices.length===0) throw "NO_DATA";
-
+    const prices = json.values.map(v=>parseFloat(v.close)).reverse();
     saveToCache(sym,prices);
     return prices;
   }catch{
