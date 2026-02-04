@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>KI Aktien Analyse 2026</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body{background:#0f1115;color:#e7fdf9;font-family:system-ui;margin:0;padding:12px}
+h1{text-align:center;font-size:1.4rem;margin:6px 0}
+small{text-align:center;display:block;color:#9cc}
+select,button{
+  width:100%;padding:14px;margin-top:10px;font-size:1rem;
+  border-radius:12px;border:1px solid #00ccaa;
+  background:#141822;color:#e7fdf9
+}
+button:disabled{opacity:.6}
+.status{text-align:center;margin-top:8px;font-weight:bold}
+.hint{text-align:center;font-size:.85rem;color:#9cc}
+.progress{height:7px;background:#1e2433;border-radius:4px;overflow:hidden;margin-top:6px}
+.progress div{height:100%;width:0%;background:#00ccaa;transition:.3s}
+.box{background:#141822;border:1px solid #00ccaa;border-radius:12px;padding:10px;margin-top:10px}
+canvas{margin-top:12px;background:#111;border-radius:12px}
+</style>
+</head>
+
+<body>
+
+<h1>KI Aktien Analyse 2026</h1>
+<small>Client-only • HTTPS • stabil • Cache + Cooldown</small>
+
+<select id="stock"></select>
+<button id="analyzeBtn">🔍 Analyse starten</button>
+
+<div class="status" id="marketStatus">Marktstatus…</div>
+<div class="hint" id="countdown"></div>
+<div class="status" id="status">Bereit</div>
+
+<div class="progress"><div id="bar"></div></div>
+
+<canvas id="chart" height="260"></canvas>
+
+<div class="box">
+  <b>Analyse-Hinweis</b>
+  <div id="info">–</div>
+</div>
+
+<script>
+/* ================= API KEY =================
+   👉 Trage hier deinen NEUEN Finnhub-API-Key ein
+*/
+const FINNHUB_KEY = "d61mtf9r01qgcobq45v0d61mtf9r01qgcobq45vg";
+
+/* ================= AKTIEN ================= */
+const STOCKS=[
+ ["AAPL","Apple"],["MSFT","Microsoft"],["NVDA","NVIDIA"],
+ ["TSLA","Tesla"],["AMZN","Amazon"],["GOOGL","Alphabet"],
+ ["META","Meta"],["SAP","SAP"],["ASML","ASML"],
+ ["NESN","Nestlé"],["ROG","Roche"],["ABB","ABB"],
+ ["JPM","JPMorgan"],["V","Visa"],["MA","Mastercard"],
+ ["KO","Coca-Cola"],["AMD","AMD"],["INTC","Intel"]
+];
+
+const stockSel=document.getElementById("stock");
+STOCKS.forEach(s=>{
+  const o=document.createElement("option");
+  o.value=s[0]; o.textContent=s[0]+" – "+s[1];
+  stockSel.appendChild(o);
+});
+
+/* ================= MARKT ================= */
+function getMarket(sym){
+  return ["SAP","ASML","NESN","ROG","ABB"].includes(sym)?"EU":"US";
+}
+function marketTimes(){
+  const m=getMarket(stockSel.value);
+  const n=new Date(),d=n.getDay();
+  const h=n.getHours()+n.getMinutes()/60;
+  if(d===0||d===6) return {open:false,next:"Montag",market:m};
+  if(m==="EU"){
+    if(h>=9&&h<17.5) return {open:true,closeIn:17.5-h,market:m};
+    if(h<9) return {open:false,openIn:9-h,market:m};
+    return {open:false,next:"Morgen 09:00",market:m};
+  }
+  if(h>=15.5&&h<22) return {open:true,closeIn:22-h,market:m};
+  if(h<15.5) return {open:false,openIn:15.5-h,market:m};
+  return {open:false,next:"Morgen 15:30",market:m};
+}
+function updateMarket(){
+  const m=marketTimes();
+  marketStatus.textContent=m.open?"🟢 Börse offen":"🔴 Börse geschlossen";
+  countdown.textContent=m.open
+    ?`Schließt in ${Math.round(m.closeIn*60)} Min`
+    :m.openIn?`Öffnet in ${Math.round(m.openIn*60)} Min`
+    :`Nächste Öffnung: ${m.next}`;
+}
+setInterval(updateMarket,30000);
+updateMarket();
+
+/* ================= CHART ================= */
+let chart;
+function drawChart(d){
+  if(chart) chart.destroy();
+  chart=new Chart(document.getElementById("chart"),{
+    type:"line",
+    data:{labels:d.c.map((_,i)=>i),
+      datasets:[{data:d.c,borderColor:"#00ccaa",tension:.3}]},
+    options:{plugins:{legend:{display:false}},responsive:true}
+  });
+}
+
+/* ================= COMMON ================= */
+const bar=document.getElementById("bar");
+const status=document.getElementById("status");
+const info=document.getElementById("info");
+const btn=document.getElementById("analyzeBtn");
+function progress(p){bar.style.width=p+"%";}
+</script>
+<script>
+/* ================= SYMBOL FIX ================= */
+function normalizeSymbol(s){
+  const map={
+    "SAP":"SAP.DE",
+    "ASML":"ASML.AS",
+    "NESN":"NESN.SW",
+    "ROG":"ROG.SW",
+    "ABB":"ABB.SW"
+  };
+  return map[s]||s;
+}
+
+/* ================= CACHE + COOLDOWN =================
+   1 Request / Aktie / 30 Minuten
+*/
+const CACHE_MINUTES = 30;
+function getCacheKey(sym){ return "fh_cache_"+sym; }
+
+function loadFromCache(sym){
+  const raw=localStorage.getItem(getCacheKey(sym));
+  if(!raw) return null;
+  try{
+    const c=JSON.parse(raw);
+    if(Date.now()-c.time < CACHE_MINUTES*60000) return c.data;
+  }catch{}
+  return null;
+}
+function saveToCache(sym,data){
+  localStorage.setItem(getCacheKey(sym),JSON.stringify({
+    time:Date.now(),data
+  }));
+}
+
+/* ================= DATEN ================= */
+async function loadMarketData(){
+  const sym=normalizeSymbol(stockSel.value);
+
+  const cached=loadFromCache(sym);
+  if(cached) return cached;
+
+  const now=Math.floor(Date.now()/1000);
+  const from=now-86400*120;
+
+  try{
+    const r=await fetch(
+      `https://finnhub.io/api/v1/stock/candle?symbol=${sym}&resolution=D&from=${from}&to=${now}&token=${FINNHUB_KEY}`
+    );
+
+    const text=await r.text();
+    if(!text) return {__error:"EMPTY_RESPONSE"};
+
+    let d;
+    try{ d=JSON.parse(text); }catch{ return {__error:"INVALID_JSON"}; }
+
+    if(d.error) return {__error:"INVALID_KEY"};
+    if(d.s==="no_data") return {__error:"NO_DATA"};
+    if(d.s!=="ok"||!Array.isArray(d.c)||d.c.length<10)
+      return {__error:"INVALID_DATA"};
+
+    saveToCache(sym,d);
+    return d;
+  }catch{
+    return {__error:"FETCH_FAILED"};
+  }
+}
+
+/* ================= KI ================= */
+let KI_AKTIV=true;
+const kiBtn=document.createElement("button");
+kiBtn.textContent="🧠 KI: EIN";
+document.body.insertBefore(kiBtn,marketStatus);
+kiBtn.onclick=()=>{
+  KI_AKTIV=!KI_AKTIV;
+  kiBtn.textContent=KI_AKTIV?"🧠 KI: EIN":"🧠 KI: AUS";
+};
+
+function runKI(d){
+  const c=d.c,o=d.o||d.c,n=c.length-1;
+  let s=0,r=[];
+  if(c[n]>c[n-5]){s+=3;r.push("• Aufwärtstrend");}
+  if(c[n]>c[n-12]){s+=2;r.push("• Mittelfristig positiv");}
+  if(c[n]>c[n-1]){s+=2;r.push("• Momentum positiv");}
+  const v=Math.abs(c[n]-c[n-4])/c[n];
+  if(v<0.03){s+=2;r.push("• Ruhige Phase");}else{s-=1;r.push("• Volatil");}
+  let sig="HALTEN"; if(s>=8)sig="KAUFEN"; if(s<=3)sig="VERKAUFEN";
+  return{
+    signal:sig,
+    timing:s>=8?"🟢 Guter Einstieg":s>=5?"🟡 Beobachten":"🔴 Schwach",
+    stability:Math.min(95,45+s*6),
+    invalid:(c[n]*0.965).toFixed(2),
+    reasons:r
+  };
+}
+
+/* ================= START ================= */
+btn.onclick=async()=>{
+  btn.disabled=true;
+  status.textContent="Analyse läuft…";
+  progress(20);
+
+  const d=await loadMarketData();
+
+  if(d.__error){
+    const map={
+      "INVALID_KEY":"🔑 API-Key ungültig",
+      "NO_DATA":"📉 Keine Marktdaten",
+      "INVALID_DATA":"⚠️ Ungültige Daten",
+      "EMPTY_RESPONSE":"🌐 Leere Antwort",
+      "INVALID_JSON":"⚠️ API-Fehler",
+      "FETCH_FAILED":"🌐 Netzwerkfehler"
+    };
+    info.textContent=map[d.__error]||"⚠️ Fehler";
+    status.textContent="⚠️ Analyse nicht möglich";
+    btn.disabled=false;
+    return;
+  }
+
+  drawChart(d);
+  progress(60);
+
+  const r=KI_AKTIV?runKI(d):{
+    signal:"HALTEN",timing:"Neutral",stability:50,invalid:"–",
+    reasons:["• KI AUS"]
+  };
+
+  info.innerHTML=`
+    <b>Signal:</b> ${r.signal}<br>
+    <b>Timing:</b> ${r.timing}<br>
+    <b>Stabilität:</b> ${r.stability}%<br>
+    <b>Kipppunkt:</b> ${r.invalid}<br><br>
+    ${r.reasons.join("<br>")}
+  `;
+
+  progress(100);
+  status.textContent="✅ Analyse abgeschlossen";
+  btn.disabled=false;
+};
+</script>
+
+</body>
+</html>
