@@ -109,15 +109,9 @@ const btn=document.getElementById("analyzeBtn");
 function progress(p){bar.style.width=p+"%";}
 </script>
 <script>
-/* ================= SYMBOL FIX ================= */
-function normalizeSymbol(s){
-  const map={"SAP":"SAP","ASML":"ASML","NESN":"NESN","ROG":"ROG","ABB":"ABB"};
-  return map[s]||s;
-}
-
 /* ================= CACHE + COOLDOWN ================= */
 const CACHE_MINUTES = 30;
-function getCacheKey(sym){ return "sp_cache_"+sym; }
+function getCacheKey(sym){ return "yf_cache_"+sym; }
 
 function loadFromCache(sym){
   const raw = localStorage.getItem(getCacheKey(sym));
@@ -132,20 +126,21 @@ function saveToCache(sym,data){
   localStorage.setItem(getCacheKey(sym),JSON.stringify({time:Date.now(),data}));
 }
 
-/* ================= LIVE DATEN ================= */
+/* ================= LIVE DATEN (Yahoo/Stooq) ================= */
 async function loadMarketData(){
-  const sym = normalizeSymbol(stockSel.value);
-
+  const sym = stockSel.value;
   const cached = loadFromCache(sym);
   if(cached) return cached;
 
   try{
-    const r = await fetch(`https://stockprices.dev/api/stocks/${sym}`);
-    const d = await r.json();
+    // Yahoo Finance CSV-Download URL (JSON geht via CORS nicht direkt)
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=1mo`;
+    const r = await fetch(url);
+    const json = await r.json();
+    if(!json.chart || !json.chart.result) throw "NO_DATA";
 
-    if(!d || !d.Price) throw "NO_DATA";
-
-    const prices = [d.Price]; // nur der aktuelle Preis, Chart zeigt Linie
+    const prices = json.chart.result[0].indicators.quote[0].close.map(p=>p||0).filter(p=>p>0);
+    if(prices.length===0) throw "NO_DATA";
 
     saveToCache(sym,prices);
     return prices;
@@ -172,11 +167,11 @@ kiBtn.addEventListener("click",()=>{
 function runKI(prices){
   const n = prices.length-1;
   let score = 0, reasons=[];
-  if(prices[n]>Math.min(...prices.slice(0,Math.max(n-5,0)))){score+=3; reasons.push("• Aufwärtstrend");}
-  if(prices[n]>Math.min(...prices.slice(0,Math.max(n-12,0)))){score+=2; reasons.push("• Mittelfristig positiv");}
-  if(prices[n]>prices[n-1]||prices.length===1){score+=2; reasons.push("• Momentum positiv");}
-  const vol = prices.length>1?Math.abs(prices[n]-prices[Math.max(n-4,0)])/prices[n]:0;
-  if(vol<0.03){score+=2; reasons.push("• Ruhige Phase");}else{score-=1; reasons.push("• Volatil");}
+  if(prices[n]>Math.min(...prices.slice(Math.max(0,n-5),n))) {score+=3; reasons.push("• Aufwärtstrend");}
+  if(prices[n]>Math.min(...prices.slice(Math.max(0,n-12),n))) {score+=2; reasons.push("• Mittelfristig positiv");}
+  if(prices[n]>prices[n-1]) {score+=2; reasons.push("• Momentum positiv");}
+  const vol = Math.abs(prices[n]-prices[Math.max(n-4,0)])/prices[n];
+  if(vol<0.03){score+=2; reasons.push("• Ruhige Phase");} else {score-=1; reasons.push("• Volatil");}
 
   let signal="HALTEN";
   if(score>=8) signal="KAUFEN";
@@ -200,7 +195,7 @@ btn.addEventListener("click",async()=>{
   const data = await loadMarketData();
 
   if(data.__error){
-    info.textContent = data.__error==="FETCH_FAILED"?"⚠️ Netzwerk/Server nicht erreichbar":"⚠️ Fehler";
+    info.textContent = data.__error==="FETCH_FAILED"?"⚠️ Netzwerk/Server nicht erreichbar":"⚠️ Keine Daten verfügbar";
     status.textContent="⚠️ Analyse nicht möglich";
     btn.disabled=false;
     progress(0);
